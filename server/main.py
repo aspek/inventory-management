@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 from pydantic import BaseModel
+from datetime import datetime, timedelta
 from mock_data import inventory_items, orders, demand_forecasts, backlog_items, spending_summary, monthly_spending, category_spending, recent_transactions, purchase_orders
 
 app = FastAPI(title="Factory Inventory Management System")
@@ -90,6 +91,25 @@ class DemandForecast(BaseModel):
     trend: str
     period: str
 
+class DemandForecastWithPrice(BaseModel):
+    id: str
+    item_sku: str
+    item_name: str
+    current_demand: int
+    forecasted_demand: int
+    trend: str
+    period: str
+    unit_price: float
+
+class RestockItem(BaseModel):
+    sku: str
+    name: str
+    quantity: int
+    unit_price: float
+
+class RestockOrderRequest(BaseModel):
+    items: List[RestockItem]
+
 class BacklogItem(BaseModel):
     id: str
     order_id: str
@@ -165,6 +185,60 @@ def get_order(order_id: str):
 def get_demand_forecasts():
     """Get demand forecasts"""
     return demand_forecasts
+
+@app.get("/api/demand/with-prices", response_model=List[DemandForecastWithPrice])
+def get_demand_forecasts_with_prices():
+    """Get demand forecasts enriched with average unit prices from order history"""
+    # Build a map of SKU -> average unit price from order history
+    sku_prices: dict = {}
+    sku_counts: dict = {}
+    for order in orders:
+        for item in order.get("items", []):
+            sku = item.get("sku", "")
+            price = item.get("unit_price", 0)
+            if sku and price:
+                sku_prices[sku] = sku_prices.get(sku, 0) + price
+                sku_counts[sku] = sku_counts.get(sku, 0) + 1
+
+    result = []
+    for forecast in demand_forecasts:
+        sku = forecast["item_sku"]
+        if sku in sku_prices:
+            avg_price = round(sku_prices[sku] / sku_counts[sku], 2)
+        else:
+            avg_price = 50.0  # Default price when no order history found
+        result.append({**forecast, "unit_price": avg_price})
+    return result
+
+@app.post("/api/orders/restock", response_model=dict)
+def submit_restock_order(request: RestockOrderRequest):
+    """Submit a restocking order based on demand forecast recommendations"""
+    if not request.items:
+        raise HTTPException(status_code=400, detail="No items provided")
+
+    now = datetime.utcnow()
+    expected_delivery = now + timedelta(days=14)
+    new_id = str(max(int(o["id"]) for o in orders) + 1)
+    # Sequential restocking order number within current year
+    restock_count = sum(1 for o in orders if o.get("customer") == "Internal Restock")
+    order_number = f"RST-{now.year}-{str(restock_count + 1).zfill(4)}"
+
+    total_value = sum(item.quantity * item.unit_price for item in request.items)
+    new_order = {
+        "id": new_id,
+        "order_number": order_number,
+        "customer": "Internal Restock",
+        "items": [{"sku": i.sku, "name": i.name, "quantity": i.quantity, "unit_price": i.unit_price} for i in request.items],
+        "status": "Processing",
+        "order_date": now.isoformat(),
+        "expected_delivery": expected_delivery.isoformat(),
+        "total_value": round(total_value, 2),
+        "actual_delivery": None,
+        "warehouse": None,
+        "category": None
+    }
+    orders.append(new_order)
+    return {"order_number": order_number, "expected_delivery": expected_delivery.isoformat(), "total_value": round(total_value, 2), "lead_days": 14}
 
 @app.get("/api/backlog", response_model=List[BacklogItem])
 def get_backlog():
