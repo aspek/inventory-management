@@ -11,25 +11,56 @@
       <div class="stats-grid">
         <div class="stat-card success">
           <div class="stat-label">{{ t('status.delivered') }}</div>
-          <div class="stat-value">{{ getOrdersByStatus('Delivered').length }}</div>
+          <div class="stat-value">{{ getRegularOrdersByStatus('Delivered').length }}</div>
         </div>
         <div class="stat-card info">
           <div class="stat-label">{{ t('status.shipped') }}</div>
-          <div class="stat-value">{{ getOrdersByStatus('Shipped').length }}</div>
+          <div class="stat-value">{{ getRegularOrdersByStatus('Shipped').length }}</div>
         </div>
         <div class="stat-card warning">
           <div class="stat-label">{{ t('status.processing') }}</div>
-          <div class="stat-value">{{ getOrdersByStatus('Processing').length }}</div>
+          <div class="stat-value">{{ getRegularOrdersByStatus('Processing').length }}</div>
         </div>
         <div class="stat-card danger">
           <div class="stat-label">{{ t('status.backordered') }}</div>
-          <div class="stat-value">{{ getOrdersByStatus('Backordered').length }}</div>
+          <div class="stat-value">{{ getRegularOrdersByStatus('Backordered').length }}</div>
+        </div>
+      </div>
+
+      <!-- Submitted Restocking Orders (only shown when restocking orders exist) -->
+      <div v-if="restockOrders.length > 0" class="card">
+        <div class="card-header">
+          <h3 class="card-title">Submitted Restocking Orders ({{ restockOrders.length }})</h3>
+        </div>
+        <div class="table-container">
+          <table class="orders-table restock-orders-table">
+            <thead>
+              <tr>
+                <th class="col-order-number">{{ t('orders.table.orderNumber') }}</th>
+                <th class="col-items">{{ t('orders.table.items') }}</th>
+                <th class="col-date">{{ t('orders.table.orderDate') }}</th>
+                <th class="col-date">{{ t('orders.table.expectedDelivery') }}</th>
+                <th class="col-lead">Lead Time</th>
+                <th class="col-value">{{ t('orders.table.totalValue') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="order in restockOrders" :key="order.id">
+                <td class="col-order-number"><strong>{{ order.order_number }}</strong></td>
+                <td class="col-items">{{ t('orders.itemsCount', { count: order.items.length }) }}</td>
+                <td class="col-date">{{ formatDate(order.order_date) }}</td>
+                <td class="col-date">{{ formatDate(order.expected_delivery) }}</td>
+                <td class="col-lead"><span class="badge info">14 days</span></td>
+                <td class="col-value"><strong>{{ currencySymbol }}{{ order.total_value.toLocaleString() }}</strong></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <h3 class="card-title">{{ t('orders.allOrders') }} ({{ orders.length }})</h3>
+          <h3 class="card-title">{{ t('orders.allOrders') }} ({{ regularOrders.length }})</h3>
         </div>
         <div class="table-container">
           <table class="orders-table">
@@ -45,7 +76,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="order in orders" :key="order.id">
+              <tr v-for="order in regularOrders" :key="order.id">
                 <td class="col-order-number"><strong>{{ order.order_number }}</strong></td>
                 <td class="col-customer">{{ translateCustomerName(order.customer) }}</td>
                 <td class="col-items">
@@ -129,6 +160,21 @@ export default {
       loadOrders()
     })
 
+    // Split orders: regular customer orders vs internal restock orders
+    const regularOrders = computed(() =>
+      orders.value.filter(order => order.customer !== 'Internal Restock')
+    )
+
+    const restockOrders = computed(() =>
+      orders.value.filter(order => order.customer === 'Internal Restock')
+    )
+
+    // Status counts operate on regular orders only (stats grid)
+    const getRegularOrdersByStatus = (status) => {
+      return regularOrders.value.filter(order => order.status === status)
+    }
+
+    // Keep original for backward compatibility
     const getOrdersByStatus = (status) => {
       return orders.value.filter(order => order.status === status)
     }
@@ -160,7 +206,10 @@ export default {
       loading,
       error,
       orders,
+      regularOrders,
+      restockOrders,
       getOrdersByStatus,
+      getRegularOrdersByStatus,
       getOrderStatusClass,
       formatDate,
       currencySymbol,
@@ -201,6 +250,15 @@ export default {
 
 .col-value {
   width: 120px;
+}
+
+.col-lead {
+  width: 110px;
+}
+
+/* Compact table for restock orders (no expandable items column) */
+.restock-orders-table .col-items {
+  width: auto;
 }
 
 /* Items details styling */
